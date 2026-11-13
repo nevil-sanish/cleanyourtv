@@ -58,6 +58,10 @@ LANG_ROW = {
     "README.uz.md": "til",
 }
 
+# Ukrainian changes the word with the number (31 мова, 32 мови, 35 мов), and tools/gen_tables.py writes
+# whichever one the count takes, so any of the three is the row.
+FORMS = {"мова": ("мова", "мови", "мов")}
+
 # `| **31 languages** | Follows the TV's language ...`. A step row such as `| **1. On the TV** |` is not
 # one: the number there is followed by a period, not by a space and the word.
 ROW = re.compile(r"^\| \*\*(\d+) ([^*|\n]+?)\*\* \|", re.M)
@@ -76,7 +80,7 @@ def rows(text):
 def claimed(text, word):
     """The number the page states in its `<word>` row, or None when it states none."""
     for number, label in rows(text):
-        if label == word:
+        if label in FORMS.get(word, (word,)):
             return number
     return None
 
@@ -114,14 +118,15 @@ class LanguageCountTest(unittest.TestCase):
         writes the count in a word this file does not carry (a new translation's own, as README.uz.md's
         `til` was beside the Turkish `dil`) is out of its reach, and that word is the line to add here.
         """
-        words = set(LANG_ROW.values())
+        words = {form for word in LANG_ROW.values() for form in FORMS.get(word, (word,))}
         for page in front_pages():
             for number, label in rows(page.read_text(encoding="utf-8")):
                 if label not in words:
                     continue
                 with self.subTest(page=page.name, word=label):
-                    self.assertEqual(
-                        LANG_ROW.get(page.name), label,
+                    word = LANG_ROW.get(page.name)
+                    self.assertIn(
+                        label, FORMS.get(word, (word,)),
                         f"{page.name} states the language count as `{label}` and is not in this "
                         f"file's table, so nothing reads its {number}")
 
