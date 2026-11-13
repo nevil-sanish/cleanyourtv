@@ -44,6 +44,9 @@ final class WallpaperPlayer {
     /** config wallpaper_true_color: ARGB_8888 instead of RGB_565. */
     private final Bitmap.Config bitmapConfig;
     private final int height;
+    private static final float PARALLAX_SCALE = 1.05f;
+    /** Theme parallax: the picture slides opposite the focus, so it reads as further away than the tiles. */
+    private final boolean parallax;
     /** wallpaper_dim as an ARGB black, painted into each picture once instead of a full-screen shade view. */
     private final int dimColor;
     /** The picture on screen, released once the next one has been drawn. */
@@ -88,9 +91,15 @@ final class WallpaperPlayer {
         image = new ImageView(context);
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        parallax = config.parallax;
+        if (parallax) {
+            // Oversized so the drift never shows an edge; a transform on one layer, nothing is redrawn.
+            image.setScaleX(PARALLAX_SCALE);
+            image.setScaleY(PARALLAX_SCALE);
+        }
         names = config.wallpaperCaptions && config.wallpaperEnabled && !files.isEmpty()
                 ? WallpaperCaptions.read(files.get(0).getParentFile()) : Collections.emptyMap();
-        caption = names.isEmpty() ? null : makeCaption(context, root);
+        caption = names.isEmpty() ? null : makeCaption(context, root, config.clockCenter);
         if (config.wallpaperEnabled && !files.isEmpty()) {
             root.addView(image, 0, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -135,6 +144,22 @@ final class WallpaperPlayer {
 
     void stop() {
         active = false;
+    }
+
+    /**
+     * Theme parallax: fx and fy are the focused view's centre, -1 (left/top) to 1 (right/bottom). The picture moves
+     * the other way by up to 80% of the margin the oversize gives it.
+     */
+    void drift(float fx, float fy) {
+        if (!parallax || image.getParent() == null) return;
+        float maxX = width * (PARALLAX_SCALE - 1f) / 2f * 0.8f;
+        float maxY = height * (PARALLAX_SCALE - 1f) / 2f * 0.8f;
+        image.animate().translationX(-clamp(fx) * maxX).translationY(-clamp(fy) * maxY)
+                .setDuration(650).setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+    }
+
+    private static float clamp(float v) {
+        return Math.max(-1f, Math.min(1f, v));
     }
 
     /** Drops the wallpaper texture when Home is hidden and Android asks the process to free memory. */
@@ -207,7 +232,7 @@ final class WallpaperPlayer {
      * Small light text under the top-right buttons, above everything else and never focusable. It sits where the
      * top bar ends in every layout, so it does not cover the clock, the stats line or the tiles.
      */
-    private static TextView makeCaption(Context context, FrameLayout root) {
+    private static TextView makeCaption(Context context, FrameLayout root, boolean clockCenter) {
         float dp = context.getResources().getDisplayMetrics().density;
         TextView text = new TextView(context);
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
@@ -227,6 +252,16 @@ final class WallpaperPlayer {
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
         params.topMargin = Math.round(110 * dp);
         params.setMarginEnd(Math.round(62 * dp));
+        if (clockCenter) {
+            // The centred clock owns the middle and the buttons the top right: the caption takes the top left,
+            // narrow enough to stay clear of the greeting.
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.topMargin = Math.round(52 * dp);
+            params.setMarginStart(Math.round(62 * dp));
+            params.setMarginEnd(0);
+            text.setMaxWidth(Math.round(280 * dp));
+            text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        }
         root.addView(text, params);
         return text;
     }

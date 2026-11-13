@@ -144,6 +144,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private AppAdapter adapter;
     private RecyclerView grid;
     private FrameLayout root;
+    /** The now_playing panel, or null when the theme leaves it off. */
+    private NowPlaying nowPlaying;
     private WallpaperPlayer wallpaperPlayer;
     private GlassView glass;
     private View ambient;
@@ -596,8 +598,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         lunarOffset = Lunar.offsetFor(cfg.lunarUtcOffset, Locale.getDefault());
         if (lunar) lunarDate.setVisibility(View.VISIBLE);
         greetingName = cfg.greetingName;
-        if (cfg.dateBelowClock) moveDateBelowClock();
-        if (cfg.dateBelowClock && cfg.iconOnlyButtons && !cfg.topMenu
+        if (cfg.dateBelowClock || cfg.clockCenter) moveDateBelowClock();
+        if (cfg.clockCenter) centerClock();
+        if (cfg.nowPlaying) {
+            nowPlaying = new NowPlaying(this, root, findViewById(R.id.leftBlock), greeting.getTypeface(),
+                    () -> focusTile(0));
+        }
+        if (cfg.parallax) {
+            // One listener for every focus move: tiles, dock and top buttons all nudge the wallpaper.
+            root.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
+                if (newFocus == null || root.getWidth() == 0) return;
+                int[] at = new int[2];
+                newFocus.getLocationOnScreen(at);
+                float cx = at[0] + newFocus.getWidth() / 2f, cy = at[1] + newFocus.getHeight() / 2f;
+                wallpaperPlayer.drift(cx / root.getWidth() * 2f - 1f, cy / root.getHeight() * 2f - 1f);
+            });
+        }
+        if (cfg.dateBelowClock && !cfg.clockCenter && cfg.iconOnlyButtons && !cfg.topMenu
                 && !getResources().getBoolean(R.bool.rtl_menu_bar)) {
             alignDateBelowIconsWithClock();
         }
@@ -1091,6 +1108,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (nowPlaying != null) nowPlaying.start();
         // A festival that started or ended while Home was in the background: rebuild with or without it.
         if (festive != festival.active(LocalDate.now())) {
             recreate();
@@ -1307,6 +1325,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onPause() {
         super.onPause();
         resumed = false;
+        if (nowPlaying != null) nowPlaying.stop();
         // No UP reaches a paused Home, so a vendor-key hold it saw go down would still open its app later.
         // Only Home's own share is dropped: a key service that saw the same DOWN keeps its hold.
         RemoteKeys.release(this);
@@ -2526,6 +2545,80 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             textLp.gravity = ((TextView) text).getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
             text.setLayoutParams(textLp);
         }
+    }
+
+    /**
+     * Theme clock_center: the header block spans the full width with the greeting, a large clock and the date centred
+     * under one another; the top buttons stay at the right, over the block.
+     */
+    private void centerClock() {
+        LinearLayout block = findViewById(R.id.leftBlock);
+        RelativeLayout.LayoutParams blp = (RelativeLayout.LayoutParams) block.getLayoutParams();
+        blp.removeRule(RelativeLayout.START_OF);
+        blp.setMarginEnd(0);
+        blp.topMargin = Math.round(24 * density);
+        block.setLayoutParams(blp);
+        block.setGravity(Gravity.CENTER_HORIZONTAL);
+        // The buttons go to the top corner instead of the block's bottom line, which is now under the date.
+        View buttons = findViewById(R.id.topButtons);
+        RelativeLayout.LayoutParams tlp = (RelativeLayout.LayoutParams) buttons.getLayoutParams();
+        tlp.removeRule(RelativeLayout.ALIGN_BOTTOM);
+        tlp.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+        tlp.bottomMargin = 0;
+        tlp.topMargin = Math.round(10 * density);
+        buttons.setLayoutParams(tlp);
+        TextView clock = findViewById(R.id.clock);
+        clock.setTextSize(132f);
+        frostText(clock, 0xFAFFFFFF, 0x80FFFFFF);
+        LinearLayout clockRow = (LinearLayout) clock.getParent();
+        LinearLayout.LayoutParams rowLp = (LinearLayout.LayoutParams) clockRow.getLayoutParams();
+        rowLp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        rowLp.gravity = Gravity.CENTER_HORIZONTAL;
+        clockRow.setLayoutParams(rowLp);
+        TextView ampm = findViewById(R.id.ampm);
+        ampm.setTextSize(22f);
+        frostText(ampm, 0xE6FFFFFF, 0x80FFFFFF);
+        ((LinearLayout.LayoutParams) ampm.getLayoutParams()).bottomMargin = Math.round(20 * density);
+        greeting.setGravity(Gravity.CENTER_HORIZONTAL);
+        greeting.setTextSize(14f);
+        View column = (View) findViewById(R.id.date).getParent();
+        ((LinearLayout.LayoutParams) column.getLayoutParams()).gravity = Gravity.CENTER_HORIZONTAL;
+        ViewGroup texts = (ViewGroup) column;
+        for (int i = 0; i < texts.getChildCount(); i++) {
+            View text = texts.getChildAt(i);
+            ((LinearLayout.LayoutParams) text.getLayoutParams()).gravity = Gravity.CENTER_HORIZONTAL;
+            ((TextView) text).setGravity(Gravity.CENTER_HORIZONTAL);
+            ((TextView) text).setShadowLayer(12 * density, 0, 2 * density, 0x66000000);
+        }
+        TextView date = findViewById(R.id.date);
+        date.setTextSize(17f);
+        // The date sits in a small frosted capsule: a translucent fill and a hairline rim, drawn once.
+        android.graphics.drawable.GradientDrawable capsule = new android.graphics.drawable.GradientDrawable();
+        capsule.setCornerRadius(100 * density);
+        capsule.setColor(0x24FFFFFF);
+        capsule.setStroke(Math.max(1, Math.round(density)), 0x40FFFFFF);
+        date.setBackground(capsule);
+        int padH = Math.round(22 * density), padV = Math.round(8 * density);
+        date.setPadding(padH, padV, padH, padV);
+        date.setShadowLayer(0, 0, 0, 0);
+        ((LinearLayout.LayoutParams) column.getLayoutParams()).topMargin = Math.round(14 * density);
+    }
+
+    /**
+     * Frosted-glass lettering: a vertical white gradient from bright to translucent.
+     * The shader is sized to the text once per layout; the clock itself only redraws once a minute.
+     */
+    private void frostText(TextView text, int top, int bottom) {
+        text.setTextColor(Color.WHITE);
+        // No shadow layer: with a shader Android draws the shadow as a grey box around the text.
+        text.setShadowLayer(0, 0, 0, 0);
+        text.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            int h = b - t;
+            if (h <= 0 || h == ob - ot && text.getPaint().getShader() != null) return;
+            text.getPaint().setShader(new android.graphics.LinearGradient(0, 0, 0, h, top, bottom,
+                    android.graphics.Shader.TileMode.CLAMP));
+            text.invalidate();
+        });
     }
 
     /** Centre the one-row header when the greeting and extra date lines are absent (#2265). */

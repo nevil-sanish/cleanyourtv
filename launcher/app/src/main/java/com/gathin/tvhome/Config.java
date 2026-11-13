@@ -150,6 +150,12 @@ final class Config {
     final boolean wallpaperTrueColor;
     /** The focused tile and the glass highlight swing past their target before settling (config.xml, focus_overshoot). */
     final boolean focusOvershoot;
+    /** Theme-only: the wallpaper drifts a few pixels towards the focused tile, for depth (theme key "parallax"). */
+    boolean parallax;
+    /** Theme-only: a large clock centred at the top of Home, date under it (theme key "clock_center"). */
+    boolean clockCenter;
+    /** Theme-only: a now-playing panel under the clock for other apps' music (theme key "now_playing"). */
+    boolean nowPlaying;
     final String vpnApp;
     final boolean showHomeSettingsShortcut;
     /** One line under the clock: CPU, free memory, free storage. Off unless config or a theme turns it on. */
@@ -717,7 +723,7 @@ final class Config {
         Festival festival = json == null ? Festival.NONE : Festival.parse(festivalName(json),
                 string(json, "festival_until", ""), string(json, "greeting", ""), string(json, "accent_color", ""));
 
-        return new Config(dock, fillDock, hidden, libraryApps, libraryExcludedApps, liveTv, liveTvAction, liveTvInputId, packageMap(launchActions), packageMap(appLabels),
+        Config made = new Config(dock, fillDock, hidden, libraryApps, libraryExcludedApps, liveTv, liveTvAction, liveTvInputId, packageMap(launchActions), packageMap(appLabels),
                 packageMap(appBanners), panelService, panelAction, panelExtra, coocaaSources, inputAction, inputSources, inputUriScheme, Math.max(1, columns),
                 Math.max(0, rowsBelow), animations, advancedEffects, shamsi, greetingName, moduleCards, reducedMotion, bootToLiveTv,
                 openOnStartChoice, dockTitle, dockRow, topMenu, launcherSettingsButton, reorderButton, showNetworkPill, showInputsPill,
@@ -733,6 +739,10 @@ final class Config {
                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
                 settingsKeyClearTask);
+        made.parallax = json != null && bool(json, "parallax", false) && !reducedMotion;
+        made.clockCenter = json != null && bool(json, "clock_center", false);
+        made.nowPlaying = json != null && bool(json, "now_playing", false);
+        return made;
     }
 
     /**
